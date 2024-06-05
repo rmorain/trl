@@ -390,6 +390,7 @@ class PPOTrainer(BaseTrainer):
             collate_fn=data_collator,
             shuffle=True,
             drop_last=True,
+            generator=torch.Generator().manual_seed(torch.initial_seed()),
         )
         return dataloader
 
@@ -1055,10 +1056,10 @@ class PPOTrainer(BaseTrainer):
                 Dictionary of training statistics
         """
         self.model.train()
-        loss_p, loss_v, train_stats = self.loss(
+        loss_p, loss_v, loss_e, train_stats = self.loss(
             old_logprobs, values, logits, vpreds, logprobs, mask, advantages, returns
         )
-        loss = loss_p + loss_v
+        loss = loss_p + loss_v + loss_e
         self.accelerator.backward(loss)
         if self.config.max_grad_norm is not None:
             if self.accelerator.sync_gradients:
@@ -1192,8 +1193,10 @@ class PPOTrainer(BaseTrainer):
 
         pg_loss = masked_mean(torch.max(pg_losses, pg_losses2), mask)
         pg_clipfrac = masked_mean(torch.gt(pg_losses2, pg_losses).float(), mask)
+        entropy = masked_mean(entropy_from_logits(logits), mask)
 
-        loss = pg_loss + self.config.vf_coef * vf_loss
+        # loss = pg_loss + self.config.vf_coef * vf_loss - self.kl_ctl.value * 0.1 * entropy
+        loss = pg_loss + self.config.vf_coef * vf_loss - self.config.entropy_coef * entropy
 
         avg_ratio = masked_mean(ratio, mask).item()
         if avg_ratio > self.config.ratio_threshold:
@@ -1203,8 +1206,6 @@ class PPOTrainer(BaseTrainer):
             pg_loss = pg_loss * 0.0
             vf_loss = vf_loss * 0.0
             loss = loss * 0.0
-
-        entropy = masked_mean(entropy_from_logits(logits), mask)
 
         approxkl = 0.5 * masked_mean((logprobs - old_logprobs) ** 2, mask)
         policykl = masked_mean(old_logprobs - logprobs, mask)
@@ -1232,7 +1233,7 @@ class PPOTrainer(BaseTrainer):
                 var=value_var.detach(),
             ),
         )
-        return pg_loss, self.config.vf_coef * vf_loss, flatten_dict(stats)
+        return pg_loss, self.config.vf_coef * vf_loss, -self.config.entropy_coef * entropy, flatten_dict(stats)
 
     def record_step_stats(self, kl_coef: float, **data):
         """

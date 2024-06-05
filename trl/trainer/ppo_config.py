@@ -90,6 +90,8 @@ class PPOConfig:
     """Range for clipping values in loss calculation"""
     vf_coef: float = 0.1
     """Scaling factor for value loss"""
+    entropy_coef: float = 0.05
+    """Scaling factor for entropy loss"""
     batch_size: int = 256
     """Number of samples per optimisation step"""
     forward_batch_size: Optional[int] = None
