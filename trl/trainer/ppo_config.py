@@ -20,15 +20,15 @@ from typing import Literal, Optional
 
 import numpy as np
 import tyro
-from typing_extensions import Annotated
-
 from trl.trainer.utils import exact_div
+from typing_extensions import Annotated
 
 from ..core import flatten_dict
 from ..import_utils import is_wandb_available
 
-
-JSONDict = Annotated[Optional[dict], tyro.conf.arg(metavar="JSON", constructor=json.loads)]
+JSONDict = Annotated[
+    Optional[dict], tyro.conf.arg(metavar="JSON", constructor=json.loads)
+]
 
 
 @dataclass
@@ -46,16 +46,16 @@ class PPOConfig:
     """Log with either 'wandb' or 'tensorboard', check  https://huggingface.co/docs/accelerate/usage_guides/tracking for more details"""
     task_name: Optional[str] = None
     """Name of task to use - used only for tracking purposes"""
-    model_name: Optional[str] = None
+    model_name: Optional[str] = "gpt2"
     """Name of model to use - used only for tracking purposes"""
-    query_dataset: Optional[str] = None
+    query_dataset: Optional[str] = "imdb"
     """Name of dataset to query - used only for tracking purposes"""
-    reward_model: Optional[str] = None
+    reward_model: Optional[str] = "sentiment-analysis:lvwerra/distilbert-imdb"
     """The reward model to use - used only for tracking purposes"""
     remove_unused_columns: bool = True
     """Remove unused columns from the dataset if `datasets.Dataset` is used"""
     tracker_kwargs: JSONDict = field(default_factory=dict)
-    """Keyword arguments for the tracker (e.g. python ppo.py --ppo_config.tracker_kwargs='{"wandb": {"entity": "my_wandb_entity", "name": "my_exp_name"}}'"""
+    """Keyword arguments for the tracker (e.g. python ppo.py --tracker_kwargs='{"wandb": {"entity": "my_wandb_entity", "name": "my_exp_name"}}'"""
     accelerator_kwargs: JSONDict = field(default_factory=dict)
     """Keyword arguments for the accelerator"""
     project_kwargs: JSONDict = field(default_factory=dict)
@@ -68,7 +68,7 @@ class PPOConfig:
     # hyperparameters
     steps: int = 20000
     """Number of training steps"""
-    learning_rate: float = 1e-5
+    learning_rate: float = 1.41e-5
     """Adam learning rate"""
     adap_kl_ctrl: bool = True
     """Use adaptive KL control, otherwise linear"""
@@ -92,11 +92,11 @@ class PPOConfig:
     """Scaling factor for value loss"""
     entropy_coef: float = 0.05
     """Scaling factor for entropy loss"""
-    batch_size: int = 256
+    batch_size: int = 128
     """Number of samples per optimisation step"""
     forward_batch_size: Optional[int] = None
     """DEPRECATED: use `mini_batch_size` instead, which does the same thing."""
-    mini_batch_size: int = 1
+    mini_batch_size: int = 128
     """Number of samples optimized in each mini batch"""
     gradient_accumulation_steps: int = 1
     """The number of gradient accumulation steps"""
@@ -106,7 +106,7 @@ class PPOConfig:
     """Number of optimisation epochs per batch of samples"""
     max_grad_norm: Optional[float] = None
     """Maximum gradient norm for gradient clipping"""
-    optimize_cuda_cache: bool = False
+    optimize_cuda_cache: Optional[bool] = None
     """DEPRECATED: use `optimize_device_cache` instead, which does the same thing."""
     optimize_device_cache: Optional[bool] = False
     """Optimize device cache for slightly more memory-efficient training"""
@@ -126,6 +126,8 @@ class PPOConfig:
     """Score clipping"""
     whiten_rewards: bool = False
     """Whiten the rewards before compute advantages"""
+    gradient_checkpointing: bool = False
+    """Enable gradient checkpointing"""
 
     # computed hyperparameters at runtime; we use `tyro.conf.Suppress` to hide them from the help text
     is_encoder_decoder: Optional[tyro.conf.Suppress[bool]] = None
@@ -141,11 +143,15 @@ class PPOConfig:
 
     if optimize_cuda_cache is not None:
         warnings.warn(
-            "The `optimize_cuda_cache` arguement will be deprecated soon, please use `optimize_device_cache` instead."
+            "The `optimize_cuda_cache` argument will be deprecated soon, please use `optimize_device_cache` instead."
         )
+
+        if optimize_device_cache is True:
+            raise ValueError(
+                "Both `optimize_device_cache` and `optimize_cuda_cache` were provided"
+            )
+
         optimize_device_cache = optimize_cuda_cache
-    else:
-        optimize_device_cache = False
 
     def __post_init__(self):
         if self.forward_batch_size is not None:
@@ -154,12 +160,12 @@ class PPOConfig:
             )
             self.mini_batch_size = self.forward_batch_size
 
-        self.backward_batch_size = self.mini_batch_size * self.gradient_accumulation_steps
+        self.backward_batch_size = (
+            self.mini_batch_size * self.gradient_accumulation_steps
+        )
         exact_div(
             self.batch_size,
             self.backward_batch_size,
-            "`batch_size`",
-            "`mini_batch_size * gradient_accumulation_steps`",
             "`batch_size` must be a multiple of `mini_batch_size * gradient_accumulation_steps`",
         )
 

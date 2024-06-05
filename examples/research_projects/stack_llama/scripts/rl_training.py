@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -32,7 +31,7 @@ tqdm.pandas()
 @dataclass
 class ScriptArguments:
     """
-    The name of the Casual LM model we wish to fine with PPO
+    The name of the Casual LM model we wish to fine-tune with PPO
     """
 
     # NOTE: gpt2 models use Conv1D instead of Linear layers which are not yet supported in 8 bit mode
@@ -67,6 +66,7 @@ class ScriptArguments:
     )
 
     adap_kl_ctrl: Optional[bool] = field(default=True, metadata={"help": "Use adaptive KL control, otherwise linear"})
+    load_in_8bit: Optional[bool] = field(default=True, metadata={"help": "whether to load the model in 8bit"})
 
 
 parser = HfArgumentParser(ScriptArguments)
@@ -90,8 +90,11 @@ config = PPOConfig(
     adap_kl_ctrl=script_args.adap_kl_ctrl,
 )
 
-train_dataset = load_dataset("lvwerra/stack-exchange-paired", data_dir="data/rl", split="train")
+train_dataset = load_dataset(
+    "lvwerra/stack-exchange-paired", data_dir="data/rl", split="train", verification_mode="no_checks"
+)
 train_dataset = train_dataset.select(range(100000))
+original_columns = train_dataset.column_names
 
 # We then define the arguments to pass to the sentiment analysis pipeline.
 # We set `return_all_scores` to True to get the sentiment score for each token.
@@ -130,9 +133,6 @@ def build_dataset(
             The dataloader for the dataset.
     """
 
-    # load imdb with datasets
-    ds = load_dataset(dataset_name, data_dir="data/rl", split="train")
-    original_columns = ds.column_names
     num_proc = 24
 
     def preprocess_function(examples):
@@ -165,7 +165,7 @@ dataset = build_dataset(tokenizer)
 
 
 def collator(data):
-    return dict((key, [d[key] for d in data]) for key in data[0])
+    return {key: [d[key] for d in data] for key in data[0]}
 
 
 # set seed before initializing value head for deterministic eval
@@ -183,7 +183,7 @@ lora_config = LoraConfig(
 )
 model = AutoModelForCausalLMWithValueHead.from_pretrained(
     config.model_name,
-    load_in_8bit=True,
+    load_in_8bit=script_args.load_in_8bit,
     device_map={"": current_device},
     peft_config=lora_config,
 )
@@ -218,11 +218,13 @@ sentiment_pipe = pipeline(
     "sentiment-analysis",
     model=reward_model_name,
     device_map={"": current_device},
-    model_kwargs={"load_in_8bit": True},
+    model_kwargs={"load_in_8bit": script_args.load_in_8bit},
     tokenizer=tokenizer,
     return_token_type_ids=False,
 )
 
+if sentiment_pipe.model.config.pad_token_id is None:
+    sentiment_pipe.model.config.pad_token_id = sentiment_pipe.model.config.eos_token_id
 # We then define the arguments to pass to the `generate` function. These arguments
 # are passed to the `generate` function of the PPOTrainer, which is a wrapper around
 # the `generate` function of the trained model.
