@@ -67,7 +67,6 @@ from . import (
     RunningMoments,
 )
 
-
 if is_deepspeed_available():
     import deepspeed
 
@@ -1373,7 +1372,7 @@ class PPOTrainer(BaseTrainer):
             loss=dict(
                 policy=pg_loss.detach(),
                 value=vf_loss.detach(),
-                entropy=entropy.detach,
+                entropy=entropy.detach(),
                 total=loss.detach(),
             ),
             policy=dict(
